@@ -1,6 +1,6 @@
-import grpc
+import grpc, sys
 from api import api_pb2, api_pb2_grpc
-from core import Tron_pb2
+from time import time
 
 grpc_server = "grpc.trongrid.io:50051"
 channel = grpc.insecure_channel(grpc_server)
@@ -24,16 +24,20 @@ def get_latest_block_number():
 
 if __name__ == "__main__":
     latest = get_latest_block_number()
-    depth = 1000
+    depth = int(sys.argv[1])
 
-    srs = []
+    srs = {}
     
-    for block_number in range(latest-depth, latest):
-        print(block_number)
-        block = get_block_by_number(block_number)
-        proposer = block.block_header.raw_data.witness_address
-        if proposer not in srs:
-            srs.append(proposer)
+    start = time()
+    for epoch in range(depth):
+        epoch_block = latest-(epoch*7200)
+        for block_number in range(epoch_block, epoch_block+27):
+            print(block_number)
+            block = get_block_by_number(block_number)
+            proposer = block.block_header.raw_data.witness_address
+            srs[proposer] = srs.get(proposer, 0)+1
     
-    print("\n".join([x.hex() for x in srs]))
+    elapsed = time()-start
+    print("\n".join([x.hex() for x in srs.keys()]))
     print("total %d unique SRs" % len(srs))
+    print("scraped in %f sec, avg %fepochs/s" % (elapsed, depth/elapsed))
