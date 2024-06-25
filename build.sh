@@ -1,0 +1,1 @@
+python3 -m grpc_tools.protoc -I=./java-tron/protocol/src/main/protos --python_out=./generated --grpc_python_out=./generated ./java-tron/protocol/src/main/protos/api/api.proto ./java-tron/protocol/src/main/protos/core/Tron.proto ./java-tron/protocol/src/main/protos/core/contract/smart_contract.proto
