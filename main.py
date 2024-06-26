@@ -1,9 +1,7 @@
-import grpc
+import grpc, ecdsa, sys, random
 from api import api_pb2, api_pb2_grpc
-import ecdsa
 from hashlib import sha256
 from eth_utils import keccak
-import sys
 
 # list of all SRs and SR partners as of block 62913164
 # the assumption is that there were no new SRs not from partner list
@@ -68,7 +66,7 @@ def verify_block_header(prev_block_hash, block_header) -> bool:
     assert block_header[offset] >> 3 == 9 # 9: idk why
     offset += 1
     offset += 1 # witness_address length, always 21
-    witness_address = block_header[offset:offset+21]
+    # witness_address = block_header[offset:offset+21]
     offset += 21
     assert block_header[offset] & 7 == 0 # VARINT
     assert block_header[offset] >> 3 == 10 # 9: idk why
@@ -82,9 +80,9 @@ def verify_block_header(prev_block_hash, block_header) -> bool:
     offset += 1
     signature_bytes = block_header[offset:]
 
-    assert witness_address in srs
-
     message_hash = sha256(raw_data).digest()
+    # for solidity tests
+    # print(message_hash.hex() + signature_bytes[64].to_bytes(32).hex() + signature_bytes[:32].hex() + signature_bytes[32:64].hex())
 
     r = int.from_bytes(signature_bytes[:32])
     s = int.from_bytes(signature_bytes[32:64])
@@ -102,13 +100,23 @@ def verify_block_header(prev_block_hash, block_header) -> bool:
     )[v]
 
     recovered_address = b"\x41" + keccak(vk.to_string())[12:]
-    assert witness_address == recovered_address
+    assert recovered_address in srs
 
     return block_number.to_bytes(8) + sha256(raw_data).digest()[8:]
 
 if __name__ == "__main__":
-    block_number = int(sys.argv[1])
-    prev_block_hash = get_block_by_number(block_number-1).blockid
-    block = get_block_by_number(block_number)
+    if len(sys.argv) == 1:
+        for i in range(1000):
+            block_number = 62913164-random.randint(0, 10000)
+            print("checking block %d" % block_number)
+            prev_block_hash = get_block_by_number(block_number-1).blockid
+            block = get_block_by_number(block_number)
     
-    print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
+            print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
+    else:
+        block_number = int(sys.argv[1])
+        print("checking block %d" % block_number)
+        prev_block_hash = get_block_by_number(block_number-1).blockid
+        block = get_block_by_number(block_number)
+
+        print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
