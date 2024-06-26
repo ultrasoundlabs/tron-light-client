@@ -23,13 +23,68 @@ def get_block_by_number(block_number):
     
     return block
 
-def verify_block_header(block_header) -> bool:
-    if block_header.raw_data.witness_address not in srs:
-        return False
+def read_varint(arr):
+    shift = 0
+    result = 0
+    offset = 0
+    while True:
+        i = arr[offset]
+        result |= (i & 0x7f) << shift
+        shift += 7
+        if not (i & 0x80):
+            break
+        offset += 1
 
-    message_hash = sha256(block_header.raw_data.SerializeToString()).digest()
-    witness_address = block_header.raw_data.witness_address
-    signature_bytes = block_header.witness_signature
+    return result, offset + 1
+
+def verify_block_header(prev_block_hash, block_header) -> bool:
+    # noir doesn't have IO wrappers so i don't use them here for simpler rewrite
+    assert block_header[0] & 7 == 2 # LEN
+    assert block_header[0] >> 3 == 1 # 1:
+    raw_data_length, offset = read_varint(block_header[1:])
+    offset += 1
+
+    raw_data = block_header[offset:offset+raw_data_length]
+    assert block_header[offset] & 7 == 0 # VARINT
+    assert block_header[offset] >> 3 == 1 # 1:
+    offset += 1
+    offset += read_varint(block_header[offset:])[1] # we don't need timestamp
+    assert block_header[offset] & 7 == 2 # LEN
+    assert block_header[offset] >> 3 == 2 # 2:
+    offset += 1
+    offset += 33 # txroot (offset + length); it's always 33 bytes total but we'll need txroot later
+    assert block_header[offset] & 7 == 2 # LEN
+    assert block_header[offset] >> 3 == 3 # 3:
+    offset += 1
+    offset += 1 # prevblockhash length, always 32
+    assert block_header[offset:offset+32] == prev_block_hash
+    offset += 32
+    assert block_header[offset] & 7 == 0 # VARINT
+    assert block_header[offset] >> 3 == 7 # 7: idk why
+    offset += 1
+    block_number, nl = read_varint(block_header[offset:])
+    offset += nl
+    assert block_header[offset] & 7 == 2 # LEN
+    assert block_header[offset] >> 3 == 9 # 9: idk why
+    offset += 1
+    offset += 1 # witness_address length, always 21
+    witness_address = block_header[offset:offset+21]
+    offset += 21
+    assert block_header[offset] & 7 == 0 # VARINT
+    assert block_header[offset] >> 3 == 10 # 9: idk why
+    offset += 1
+    offset += 1 # version, always 30
+
+    assert block_header[offset] & 7 == 2 # LEN
+    assert block_header[offset] >> 3 == 2 # 2:
+    offset += 1
+    assert block_header[offset] == 65 # signature is always 65 bytes
+    offset += 1
+    signature_bytes = block_header[offset:]
+
+    assert witness_address in srs
+
+    message_hash = sha256(raw_data).digest()
 
     r = int.from_bytes(signature_bytes[:32])
     s = int.from_bytes(signature_bytes[32:64])
@@ -47,11 +102,13 @@ def verify_block_header(block_header) -> bool:
     )[v]
 
     recovered_address = b"\x41" + keccak(vk.to_string())[12:]
+    assert witness_address == recovered_address
 
-    return witness_address == recovered_address
+    return block_number.to_bytes(8) + sha256(raw_data).digest()[8:]
 
 if __name__ == "__main__":
     block_number = int(sys.argv[1])
+    prev_block_hash = get_block_by_number(block_number-1).blockid
     block = get_block_by_number(block_number)
     
-    assert verify_block_header(block.block_header)
+    print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
