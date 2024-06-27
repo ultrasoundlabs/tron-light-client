@@ -1,6 +1,7 @@
-import grpc, sys
+import grpc, sys, ecdsa
 from api import api_pb2, api_pb2_grpc
 from time import time
+from hashlib import sha256
 
 grpc_server = "grpc.trongrid.io:50051"
 channel = grpc.insecure_channel(grpc_server)
@@ -29,15 +30,26 @@ if __name__ == "__main__":
     srs = {}
     
     start = time()
-    for epoch in range(depth):
+    for epoch in range(1, depth):
         epoch_block = latest-(epoch*7200)
-        for block_number in range(epoch_block, epoch_block+27):
-            print(block_number)
-            block = get_block_by_number(block_number)
-            proposer = block.block_header.raw_data.witness_address
+        for block_offset in range(27):
+            print(epoch_block + block_offset)
+            block = get_block_by_number(epoch_block + block_offset)
+            
+            signature = block.block_header.witness_signature
+            sig = ecdsa.util.sigencode_string(int.from_bytes(signature[:32]), int.from_bytes(signature[32:64]), 2**256-1)
+            proposer = ecdsa.VerifyingKey.from_public_key_recovery_with_digest(
+                sig,
+                sha256(block.block_header.raw_data.SerializeToString()).digest(),
+                curve=ecdsa.SECP256k1
+            )[signature[64]].to_string()
+
             srs[proposer] = srs.get(proposer, 0)+1
     
     elapsed = time()-start
-    print("\n".join([x.hex() for x in srs.keys()]))
+    keys = "\n".join([x.hex() for x in srs.keys()])
+    print(keys)
     print("total %d unique SRs" % len(srs))
     print("scraped in %f sec, avg %fepochs/s" % (elapsed, depth/elapsed))
+    open("srs.txt", "w").write(keys)
+    print("saved in srs.txt")
