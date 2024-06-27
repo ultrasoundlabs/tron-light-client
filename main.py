@@ -97,12 +97,11 @@ def verify_block_header(prev_block_hash, block_header) -> bool:
         message_hash,
         curve=ecdsa.SECP256k1,
         hashfunc=sha256
-    )[v]
+    )[v].to_string()
 
-    recovered_address = b"\x41" + keccak(vk.to_string())[12:]
-    assert recovered_address in srs
+    assert vk in srs
 
-    return block_number.to_bytes(8) + sha256(raw_data).digest()[8:]
+    return vk
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
@@ -111,12 +110,16 @@ if __name__ == "__main__":
             print("checking block %d" % block_number)
             prev_block_hash = get_block_by_number(block_number-1).blockid
             block = get_block_by_number(block_number)
-    
+
             print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
+            
     else:
         block_number = int(sys.argv[1])
-        print("checking block %d" % block_number)
         prev_block_hash = get_block_by_number(block_number-1).blockid
         block = get_block_by_number(block_number)
 
+        print(prev_block_hash.hex())
+        print(block.blockid.hex())
+        print(block.block_header.raw_data.txTrieRoot.hex())
         print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
+        print(block.block_header.SerializeToString().hex())
