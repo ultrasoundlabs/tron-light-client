@@ -1,7 +1,9 @@
 import grpc, ecdsa, sys, random
 from api import api_pb2, api_pb2_grpc
+from core.contract import smart_contract_pb2
 from hashlib import sha256
-from eth_utils import keccak
+from trontrie import create_tree
+from base58 import b58encode_check
 
 # list of all SRs and SR partners as of block 62913164
 # the assumption is that there were no new SRs not from partner list
@@ -103,23 +105,54 @@ def verify_block_header(prev_block_hash, block_header) -> bool:
 
     return vk
 
-if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        for i in range(1000):
-            block_number = 62913164-random.randint(0, 10000)
-            print("checking block %d" % block_number)
-            prev_block_hash = get_block_by_number(block_number-1).blockid
-            block = get_block_by_number(block_number)
+def parse_usdt_transfer(tx):
+    tx_data = tx.transaction.raw_data.contract[0]
 
-            print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
-            
+    if tx_data.type != 31: return None # 31 = TriggerSmartContract
+
+    call = smart_contract_pb2.TriggerSmartContract()
+    call.ParseFromString(tx_data.parameter.value)
+    
+    if call.contract_address != bytes.fromhex("41a614f803b6fd780986a42c78ec9c7f77e6ded13c"): return None # USDT contract TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+
+    calldata = call.data
+
+    if calldata[:4] != bytes.fromhex("a9059cbb"): return None # transfer(address,uint256)
+
+    sender = b58encode_check(call.owner_address).decode()
+
+    to = b58encode_check(b"\x41" + calldata[16:36]).decode()
+
+    amount = int.from_bytes(calldata[36:68])/10**6
+    return sender, to, amount
+
+if __name__ == "__main__":
+    blocks = []
+    if len(sys.argv) > 1:
+        blocks.append(int(sys.argv[1]))
     else:
-        block_number = int(sys.argv[1])
+        for i in range(1000):
+            blocks.append(62913164-random.randint(0, 10000))
+            
+    for block_number in blocks:
         prev_block_hash = get_block_by_number(block_number-1).blockid
         block = get_block_by_number(block_number)
+
+        print("checking block %d..." % block_number)
+
+        tx_root = create_tree([sha256(x.transaction.SerializeToString()).digest() for x in block.transactions]).hash
+        assert tx_root == block.block_header.raw_data.txTrieRoot
 
         print(prev_block_hash.hex())
         print(block.blockid.hex())
         print(block.block_header.raw_data.txTrieRoot.hex())
         print(verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
         print(block.block_header.SerializeToString().hex())
+
+        print("\nlooking for USDT transfers...")
+
+        for tx in block.transactions:
+            if not tx.result.result: continue # result is a bool (executed/failed)
+
+            if transfer := parse_usdt_transfer(tx):
+                print("{} -> {} ({} USDT)".format(*transfer))
