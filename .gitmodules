@@ -4,4 +4,4 @@
 
 [submodule "googleapis"]
 	path = googleapis
-	url = https://github.com/googleapis/googleapis # this is NOT how I am supposed to do this
+	url = https://github.com/googleapis/googleapis
