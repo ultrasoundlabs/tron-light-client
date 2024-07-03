@@ -1,7 +1,6 @@
 [submodule "java-tron"]
 	path = java-tron
 	url = https://github.com/tronprotocol/java-tron
-
 [submodule "googleapis"]
 	path = googleapis
-	url = https://github.com/googleapis/googleapis
+	url = https://github.com/googleapis/googleapis.git
