@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
     blocks = []
             
-    for offset in range(27):
+    for offset in range(18):
         prev_block_hash = get_block_by_number(start_block+offset-1).blockid
         block = get_block_by_number(start_block+offset)
 
@@ -143,7 +143,7 @@ if __name__ == "__main__":
         raw_data = block.block_header.raw_data.SerializeToString()
         tx_root = block.block_header.raw_data.txTrieRoot
         public_key = verify_block_header(prev_block_hash, block.block_header.SerializeToString())
-        signature = block.block_header.witness_signature
+        signature = block.block_header.witness_signature[:64]
 
         blocks.append({
             "new_block_id": str([str(x) for x in block.blockid]).replace("'", "\""),
