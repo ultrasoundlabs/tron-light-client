@@ -1,4 +1,4 @@
-import grpc, ecdsa, sys, random
+import grpc, ecdsa, sys, json
 from api import api_pb2, api_pb2_grpc
 from core.contract import smart_contract_pb2
 from hashlib import sha256
@@ -135,7 +135,7 @@ if __name__ == "__main__":
         prev_block_hash = get_block_by_number(start_block+offset-1).blockid
         block = get_block_by_number(start_block+offset)
 
-        print("checking block %d..." % (start_block+offset))
+        print("dumping block %d..." % (start_block+offset))
 
         tx_root = create_tree([sha256(x.transaction.SerializeToString()).digest() for x in block.transactions]).hash
         assert tx_root == block.block_header.raw_data.txTrieRoot
@@ -146,23 +146,12 @@ if __name__ == "__main__":
         signature = block.block_header.witness_signature[:64]
 
         blocks.append({
-            "new_block_id": str([str(x) for x in block.blockid]).replace("'", "\""),
-            "prev_block_id": str([str(x) for x in prev_block_hash]).replace("'", "\""),
-            "public_key": str([str(x) for x in public_key]).replace("'", "\""),
-            "raw_data": str([str(x) for x in raw_data + (b"\x00" * (128-len(raw_data)))]).replace("'", "\""),
-            "raw_data_length": "\"%d\"" % len(raw_data),
-            "signature": str([str(x) for x in signature]).replace("'", "\""),
-            "tx_root": str([str(x) for x in tx_root]).replace("'", "\"")
+            "new_block_id": block.blockid.hex(),
+            "prev_block_id": prev_block_hash.hex(),
+            "public_key": public_key.hex(),
+            "raw_data": raw_data.hex(),
+            "signature": signature.hex(),
+            "tx_root": tx_root.hex()
         })
     
-    prover_data = ""
-    prover_data += "new_block_id = " + blocks[-1]["new_block_id"]
-    prover_data += "\nprev_block_id = " + blocks[0]["prev_block_id"]
-    prover_data += "\ntx_roots = [" + ", ".join([x["tx_root"] for x in blocks]) + "]\n"
-    for block in blocks:
-        prover_data += "\n[[blocks]]\n"
-        for key, value in block.items():
-            prover_data += "{} = {}\n".format(key, value)
-        prover_data += "\n"
-    
-    open("Prover.toml", "w").write(prover_data)
+    open("input.json", "w").write(json.dumps(blocks))
