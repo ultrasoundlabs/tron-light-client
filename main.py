@@ -1,4 +1,4 @@
-import grpc, ecdsa, sys, random
+import grpc, ecdsa, sys, json
 from api import api_pb2, api_pb2_grpc
 from core.contract import smart_contract_pb2
 from hashlib import sha256
@@ -127,35 +127,31 @@ def parse_usdt_transfer(tx):
     return sender, to, amount
 
 if __name__ == "__main__":
-    blocks = []
-    if len(sys.argv) > 1:
-        blocks.append(int(sys.argv[1]))
-    else:
-        for i in range(1000):
-            blocks.append(62913164-random.randint(0, 10000))
-            
-    for block_number in blocks:
-        prev_block_hash = get_block_by_number(block_number-1).blockid
-        block = get_block_by_number(block_number)
+    start_block = int(sys.argv[1])
 
-        print("checking block %d..." % block_number)
+    blocks = []
+            
+    for offset in range(18):
+        prev_block_hash = get_block_by_number(start_block+offset-1).blockid
+        block = get_block_by_number(start_block+offset)
+
+        print("dumping block %d..." % (start_block+offset))
 
         tx_root = create_tree([sha256(x.transaction.SerializeToString()).digest() for x in block.transactions]).hash
         assert tx_root == block.block_header.raw_data.txTrieRoot
 
-        print("prev block:", prev_block_hash.hex())
-        print("new block:", block.blockid.hex())
-        print("raw data:", block.block_header.raw_data.SerializeToString().hex())
-        print("raw data->tx root:", block.block_header.raw_data.txTrieRoot.hex())
-        print("proposer public key:", verify_block_header(prev_block_hash, block.block_header.SerializeToString()).hex())
-        print("proposer signature:", block.block_header.witness_signature.hex())
+        raw_data = block.block_header.raw_data.SerializeToString()
+        tx_root = block.block_header.raw_data.txTrieRoot
+        public_key = verify_block_header(prev_block_hash, block.block_header.SerializeToString())
+        signature = block.block_header.witness_signature[:64]
 
-        print(block.block_header)
-
-        print("\nlooking for USDT transfers...")
-
-        for tx in block.transactions:
-            if not tx.result.result: continue # result is a bool (executed/failed)
-
-            if transfer := parse_usdt_transfer(tx):
-                print("{} -> {} ({} USDT)".format(*transfer))
+        blocks.append({
+            "new_block_id": block.blockid.hex(),
+            "prev_block_id": prev_block_hash.hex(),
+            "public_key": public_key.hex(),
+            "raw_data": raw_data.hex(),
+            "signature": signature.hex(),
+            "tx_root": tx_root.hex()
+        })
+    
+    open("input.json", "w").write(json.dumps(blocks))
