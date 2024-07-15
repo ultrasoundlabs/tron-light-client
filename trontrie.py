@@ -1,72 +1,48 @@
 import hashlib
-from typing import List, Optional
-
-# rewritten line-by-line from here: https://github.com/tronprotocol/java-tron/blob/develop/chainbase/src/main/java/org/tron/core/capsule/utils/MerkleTree.java
-
-class Leaf:
-    hash: bytes
-    left: Optional[super]
-    right: Optional[super]
-
-def create_tree(hashes: List[bytes]) -> bytes:
-    
-    leaves = create_leaves(hashes)
-    while len(leaves) > 1:
-        leaves = create_parent_leaves(leaves)
-
-    return leaves[0]
-
-def create_parent_leaves(leaves: List[Leaf]) -> List[Leaf]:
-    length = len(leaves)
-    parent = []
-    for i in range(0, length, 2):
-        if i >= length: break
-
-        if i + 1 < length:
-            right = leaves[i + 1]
-        else:
-            right = None
-        
-        parent.append(combine_into_leaf(leaves[i], right))
-    
-    return parent
-
-def create_leaves(hashes: List[bytes]) -> List[Leaf]:
-    length = len(hashes)
-    leaves = []
-    for i in range(0, length, 2):
-        if i >= length: break
-
-        if i + 1 < length:
-            right = create_leaf(hashes[i + 1])
-        else:
-            right = None
-        
-        leaves.append(combine_into_leaf(create_leaf(hashes[i]), right))
-    
-    return leaves
-
-def combine_into_leaf(left: Leaf, right: Leaf) -> Leaf:
-    leaf = Leaf()
-    if right is None:
-        leaf.hash = left.hash
-    else:
-        leaf.hash = compute_hash(left.hash, right.hash)
-    leaf.left = left
-    leaf.right = right
-    return leaf
-
-def create_leaf(hash: bytes) -> Leaf:
-    leaf = Leaf()
-    leaf.hash = hash
-    return leaf
 
 def compute_hash(left: bytes, right: bytes) -> bytes:
     return hashlib.sha256(left + right).digest()
 
+def verify_proof(proof, root, leaf, index):
+    # path = list(zip(proof["rule"], [bytes.fromhex(x) for x in proof["path"]]))
 
-if __name__ == "__main__":
-    transactions = [b'tx1', b'tx2', b'tx3', b'tx4']
+    # if not path:
+    #     return compute_hash(b"", b"")
 
-    root = create_tree(transactions)
-    print("Transaction Root:", root.hex())
+    # bit, result = path[0]
+    # index = 0
+    # while index < len(path) - 1:
+    #     next_bit, digest = path[index + 1]
+
+    #     if bit == 0:
+    #         result = compute_hash(result, digest)
+    #     elif bit == 1:
+    #         result = compute_hash(digest, result)
+    #     else:
+    #         raise ValueError('Invalid bit found')
+
+    #     bit = next_bit
+    #     index += 1
+
+    # return result
+
+    hash = leaf
+
+    for i in range(len(proof)):
+        proof_element = proof[i]
+
+        if index % 2 == 0:
+            hash = compute_hash(hash, proof_element)
+        else:
+            hash = compute_hash(proof_element, hash)
+
+        index = index // 2
+    
+    return hash == root
+
+def soliditify(merkle):
+    proof = merkle.path[1:]
+    leaf = merkle.path[0]
+    index = int("".join([str(x) for x in merkle.rule][::-1]), 2)
+
+    return proof, leaf, index

@@ -1,8 +1,9 @@
 import grpc, ecdsa, sys, json
 from api import api_pb2, api_pb2_grpc
 from core.contract import smart_contract_pb2
+from pymerkle import verify_inclusion, InmemoryTree as MerkleTree
 from hashlib import sha256
-from trontrie import create_tree
+from trontrie import *
 from base58 import b58encode_check
 
 # list of all SRs and SR partners as of block 62913164
@@ -136,12 +137,19 @@ if __name__ == "__main__":
         block = get_block_by_number(start_block+offset)
 
         print("dumping block %d..." % (start_block+offset))
+        
+        tree = MerkleTree(algorithm="sha256", disable_security=True)
+        for tx in block.transactions:
+            tree.append_entry(tx.transaction.SerializeToString())
 
-        tx_root = create_tree([sha256(x.transaction.SerializeToString()).digest() for x in block.transactions]).hash
+        tx_root = tree.root.digest
         assert tx_root == block.block_header.raw_data.txTrieRoot
 
+        merkle_proof = tree.prove_inclusion(4) # counting from 1
+        proof, leaf, index = soliditify(merkle_proof)
+        assert verify_proof(proof, tx_root, leaf, index)
+
         raw_data = block.block_header.raw_data.SerializeToString()
-        tx_root = block.block_header.raw_data.txTrieRoot
         public_key = verify_block_header(prev_block_hash, block.block_header.SerializeToString())
         signature = block.block_header.witness_signature[:64]
 
@@ -151,7 +159,14 @@ if __name__ == "__main__":
             "public_key": public_key.hex(),
             "raw_data": raw_data.hex(),
             "signature": signature.hex(),
-            "tx_root": tx_root.hex()
+            "tx_root": tx_root.hex(),
+            "txs": [
+                {
+                    "index": index,
+                    "inclusion_proof": b"".join(proof).hex(), # bytes32[]
+                    "tx": block.transactions[3].transaction.SerializeToString().hex() # counting from 0
+                }
+            ]
         })
     
     open("input.json", "w").write(json.dumps(blocks))
