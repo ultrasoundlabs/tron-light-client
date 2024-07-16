@@ -106,25 +106,109 @@ def verify_block_header(prev_block_hash, block_header) -> bool:
 
     return vk
 
-def parse_usdt_transfer(tx):
+def is_usdt_transfer(tx):
+    if tx.transaction.ret[0].contractRet != 1: return False
+
     tx_data = tx.transaction.raw_data.contract[0]
 
-    if tx_data.type != 31: return None # 31 = TriggerSmartContract
+    if tx_data.type != 31: return False # 31 = TriggerSmartContract
 
     call = smart_contract_pb2.TriggerSmartContract()
     call.ParseFromString(tx_data.parameter.value)
     
-    if call.contract_address != bytes.fromhex("41a614f803b6fd780986a42c78ec9c7f77e6ded13c"): return None # USDT contract TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+    if call.contract_address != bytes.fromhex("41a614f803b6fd780986a42c78ec9c7f77e6ded13c"): return False # USDT contract TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
 
     calldata = call.data
 
-    if calldata[:4] != bytes.fromhex("a9059cbb"): return None # transfer(address,uint256)
+    if calldata[:4] != bytes.fromhex("a9059cbb"): return False # transfer(address,uint256)
 
-    sender = b58encode_check(call.owner_address).decode()
+    return True
 
-    to = b58encode_check(b"\x41" + calldata[16:36]).decode()
+def parse_usdt_transfer(tx):
 
-    amount = int.from_bytes(calldata[36:68])/10**6
+    assert tx[-1] == 1 # ret.contractRet: SUCCESS (THIS THING IS CRITICAL!!!)
+
+    assert tx[0] & 7 == 2 # LEN
+    assert tx[0] >> 3 == 1 # 1:
+    length, offset = read_varint(tx[1:]) # raw_data length
+    offset += 1
+    
+    # skipping unnecessary protobuf elements
+    while True:
+        t = tx[offset]
+        if t == 0x5a: # 11: LEN
+            break
+        offset += 1
+        if t & 7 == 5:
+            offset += 4
+        else:
+            length, v = read_varint(tx[offset:])
+            offset += v + (length * (t & 7 == 2))
+
+    assert tx[offset] & 7 == 2 # LEN
+    assert tx[offset] >> 3 == 11 # 11:
+    offset += 1
+    length, v = read_varint(tx[offset:]) # contract length
+    offset += v
+
+    assert tx[offset] & 7 == 0 # VARINT
+    assert tx[offset] >> 3 == 1 # 1: (we enter the contract protobuf)
+    offset += 1
+    call_type, v = read_varint(tx[offset:]) # contract call type
+    offset += v
+
+    assert call_type == 31 # TriggerSmart Contract
+
+    assert tx[offset] & 7 == 2 # LEN
+    assert tx[offset] >> 3 == 2 # 2:
+    offset += 1
+    length, v = read_varint(tx[offset:]) # container length
+    offset += v
+
+    assert tx[offset] & 7 == 2 # LEN
+    assert tx[offset] >> 3 == 1 # 1:
+    offset += 1
+    length, v = read_varint(tx[offset:]) # type_url length
+    offset += v
+
+    assert tx[offset:offset+length] == b"type.googleapis.com/protocol.TriggerSmartContract" # this is unnecessary because we verified the type == 31
+    offset += length
+
+    assert tx[offset] & 7 == 2 # LEN
+    assert tx[offset] >> 3 == 2 # 2:
+    offset += 1
+    length, v = read_varint(tx[offset:]) # TriggerSmartContract length ?
+    offset += v
+
+    assert tx[offset] & 7 == 2 # LEN
+    assert tx[offset] >> 3 == 1 # 1:
+    offset += 1
+    length, v = read_varint(tx[offset:]) # owner_address length
+    offset += v
+
+    sender = tx[offset:offset+length][1:] # strip 0x41
+    offset += length
+
+    assert tx[offset] & 7 == 2 # LEN
+    assert tx[offset] >> 3 == 2 # 2:
+    offset += 1
+    length, v = read_varint(tx[offset:]) # contract_address length
+    offset += v
+
+    assert tx[offset:offset+length] == bytes.fromhex("41a614f803b6fd780986a42c78ec9c7f77e6ded13c") # USDT contract TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+    offset += length
+
+    assert tx[offset] & 7 == 2 # LEN
+    assert tx[offset] >> 3 == 4 # 4: (we skip 3 because no call_value)
+    offset += 1
+    length, v = read_varint(tx[offset:]) # data length
+    offset += v
+
+    data = tx[offset:offset+length]
+    assert data[:4] == bytes.fromhex("a9059cbb") # transfer(address,uint256)
+    to = data[16:36]
+    amount = int.from_bytes(data[36:68])
+
     return sender, to, amount
 
 if __name__ == "__main__":
@@ -145,9 +229,24 @@ if __name__ == "__main__":
         tx_root = tree.root.digest
         assert tx_root == block.block_header.raw_data.txTrieRoot
 
-        merkle_proof = tree.prove_inclusion(4) # counting from 1
-        proof, leaf, index = soliditify(merkle_proof)
-        assert verify_proof(proof, tx_root, leaf, index)
+        txs = []
+        for i, tx in enumerate(block.transactions):
+            if is_usdt_transfer(tx):
+                raw_tx = tx.transaction.SerializeToString()
+                sender, to, amount = parse_usdt_transfer(raw_tx)
+
+                merkle_proof = tree.prove_inclusion(i+1) # counting from 1
+                proof, leaf, index = soliditify(merkle_proof)
+                assert verify_proof(proof, tx_root, leaf, index)
+                txs.append({
+                    "from": sender.hex(),
+                    "to": to.hex(),
+                    "amount": amount,
+                    "tx_index": i,
+                    "inclusion_proof": b"".join(proof).hex(), # bytes32[]
+                    "tx": raw_tx.hex()
+                })
+        print("total %d USDT transfers" % len(txs))
 
         raw_data = block.block_header.raw_data.SerializeToString()
         public_key = verify_block_header(prev_block_hash, block.block_header.SerializeToString())
@@ -160,13 +259,7 @@ if __name__ == "__main__":
             "raw_data": raw_data.hex(),
             "signature": signature.hex(),
             "tx_root": tx_root.hex(),
-            "txs": [
-                {
-                    "index": index,
-                    "inclusion_proof": b"".join(proof).hex(), # bytes32[]
-                    "tx": block.transactions[3].transaction.SerializeToString().hex() # counting from 0
-                }
-            ]
+            "txs": txs
         })
     
     open("input.json", "w").write(json.dumps(blocks))
