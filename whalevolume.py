@@ -58,7 +58,7 @@ if __name__ == "__main__":
             if call.contract_address != b58decode_check("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"): continue
 
             _from = b58encode_check(call.owner_address).decode()
-            to = b58encode_check(call.data[15:36]).decode()
+            to = b58encode_check(b"\x41" + call.data[16:36]).decode()
 
             total_txs += 1
 

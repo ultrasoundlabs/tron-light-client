@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
             if call.contract_address != b58decode_check("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"): continue
 
-            to = b58encode_check(call.data[15:36]).decode()
+            to = b58encode_check(b"\x41" + call.data[16:36]).decode()
             if to in usdt_holders: continue
 
             total_txs += 1
